@@ -28,6 +28,8 @@ if (adminPassword.length < 12) {
   throw new Error("SEED_ADMIN_PASSWORD must contain at least 12 characters.");
 }
 
+const requiredAdminPassword: string = adminPassword;
+
 const pool = new Pool({
   connectionString: databaseUrl,
 });
@@ -125,7 +127,7 @@ async function main(): Promise<void> {
       `Admin user "${adminUsername}" already exists; existing password preserved.`,
     );
   } else {
-    const passwordHash = await bcrypt.hash("adminPassword", 12);
+    const passwordHash = await bcrypt.hash(requiredAdminPassword, 12);
 
     await prisma.user.create({
       data: {

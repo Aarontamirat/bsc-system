@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 
 import { prisma } from "@/lib/prisma";
+import { UserRole } from "@/generated/prisma";
 import {
   getScorecards,
   type ScorecardActor,
@@ -17,12 +18,12 @@ function formatFiscalYear(year: number): string {
 
 function getActor(user: {
   id: string;
-  role: string;
-  departmentId: string | null;
+  role: UserRole;
+  departmentId: string;
 }): ScorecardActor {
   return {
     userId: user.id,
-    role: String(user.role),
+    role: user.role,
     departmentId: user.departmentId,
   };
 }
@@ -54,7 +55,7 @@ export default async function ScorecardsPage() {
   const [scorecards, departments] = await Promise.all([
     getScorecards(actor),
 
-    actor.role === "admin"
+    actor.role === UserRole.ADMIN
       ? prisma.department.findMany({
           select: {
             id: true,
@@ -125,7 +126,7 @@ export default async function ScorecardsPage() {
             </p>
           </div>
 
-          {actor.role === "admin" && (
+          {actor.role === UserRole.ADMIN && (
             <ScorecardCreateDialog departments={departments} />
           )}
         </div>
@@ -221,12 +222,12 @@ export default async function ScorecardsPage() {
               <h3 className="text-lg font-semibold">No scorecards yet</h3>
 
               <p className="mt-2 max-w-md text-sm text-muted-foreground">
-                {actor.role === "admin"
+                {actor.role === UserRole.ADMIN
                   ? "Create the first departmental scorecard to begin defining perspectives, objectives and activities."
                   : "Your department does not have a scorecard yet."}
               </p>
 
-              {actor.role === "admin" && (
+              {actor.role === UserRole.ADMIN && (
                 <div className="mt-5">
                   <ScorecardCreateDialog departments={departments} />
                 </div>

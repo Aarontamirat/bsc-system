@@ -1,0 +1,35 @@
+services:
+  postgres:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: bsc_system
+      POSTGRES_USER: bsc_app
+      POSTGRES_PASSWORD: bsc_password_change_me
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bsc_app -d bsc_system"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://bsc_app:bsc_password_change_me@postgres:5432/bsc_system?schema=public
+      AUTH_SECRET: replace_with_a_long_random_secret_before_lan_use
+      SEED_ADMIN_USERNAME: admin
+      SEED_ADMIN_PASSWORD: replace_with_a_12_character_password
+      NEXT_TELEMETRY_DISABLED: "1"
+    ports:
+      - "3000:3000"
+
+volumes:
+  postgres-data:

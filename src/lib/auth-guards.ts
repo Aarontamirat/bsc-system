@@ -1,3 +1,5 @@
+import "server-only";
+
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { UserRole } from "@/generated/prisma/client";

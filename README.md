@@ -1,36 +1,98 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Department Balanced Scorecard System
 
-## Getting Started
+Production-oriented internal/LAN Balanced Scorecard application built with Next.js App Router, Auth.js credentials auth, Prisma 7, PostgreSQL, Tailwind CSS, and shadcn/Base UI components.
 
-First, run the development server:
+## Requirements
+
+- Node.js 24+
+- PostgreSQL 16+
+- npm
+
+## Local Setup
+
+1. Copy `.env.example` to `.env`.
+2. Set `DATABASE_URL`, `AUTH_SECRET`, `SEED_ADMIN_USERNAME`, and `SEED_ADMIN_PASSWORD`.
+3. Install dependencies:
+
+```bash
+npm ci
+```
+
+4. Generate Prisma Client and apply migrations:
+
+```bash
+npm run db:generate
+npx prisma migrate deploy
+```
+
+5. Seed the initial admin account:
+
+```bash
+npm run db:seed
+```
+
+6. Start the application:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open `http://localhost:3000`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Docker / LAN
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Update secrets and passwords in `docker-compose.yml`, then run:
 
-## Learn More
+```bash
+docker compose up --build
+```
 
-To learn more about Next.js, take a look at the following resources:
+After the web container starts, seed the admin user once:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+docker compose exec web npm run db:seed
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Open `http://localhost:3000` from the host. For LAN access, expose port `3000` on the host machine or place a reverse proxy in front of the app.
 
-## Deploy on Vercel
+## Validation Commands
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bash
+npx prisma validate
+npm run db:generate
+npm run test:bsc
+npx tsc --noEmit
+npm run lint
+npm run build
+npm run verify:auth
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## First End-to-End BSC Test
+
+1. Sign in as the seeded admin.
+2. Open `Administration > Departments` and confirm at least one active department exists.
+3. Open `Scorecards` and create a scorecard for a department and fiscal year.
+4. Open the scorecard and add perspectives totaling 100%.
+5. Under each perspective, add objectives totaling 100%.
+6. Under each objective, add activities totaling 100%, with unit, annual target, and baseline.
+7. Click `Validate scorecard`; incomplete levels or totals other than 100% should be rejected.
+8. Open `Plans & Actuals`, select the scorecard, and click `Initialize plans`.
+9. Confirm the generated monthly plans are present and adjust one value as admin.
+10. Sign in as a department user and confirm plans are read-only while actuals can be entered for the user department.
+11. Enter actual values, save, refresh, and confirm the persisted values remain.
+12. Open `Dashboard` and `Consolidated Reports` and confirm performance uses the saved plan/actual data.
+
+## Notes
+
+- Fiscal year runs July through June.
+- Fiscal month indexes are July `0` through June `11`.
+- Server actions authenticate and authorize every mutation.
+- Client components receive serializable DTOs and do not import Prisma or server-only services.
+
+SIMPLIFIED
+
+npm ci
+npm run db:generate
+npx prisma migrate deploy
+npm run db:seed
+npm run dev

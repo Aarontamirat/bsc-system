@@ -1,3 +1,5 @@
+import "server-only";
+
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import bcrypt from "bcrypt";
@@ -111,7 +113,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (session.user && token.sub) {
         session.user.id = token.sub;
         session.user.username = (token.username as string) ?? "";
-        session.user.role = (token.role as UserRole) ?? "USER";
+        session.user.role = (token.role as UserRole) ?? UserRole.USER;
         session.user.departmentId = (token.departmentId as string) ?? "";
       }
 

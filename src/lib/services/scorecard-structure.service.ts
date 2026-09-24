@@ -1,9 +1,11 @@
+import "server-only";
+
 import { prisma } from "@/lib/prisma";
 import {
   ScorecardServiceError,
   type ScorecardActor,
 } from "./scorecard.service";
-import { UnitOfMeasure } from "@/generated/prisma";
+import { UnitOfMeasure, UserRole } from "@/generated/prisma";
 
 function normalizeName(value: string) {
   return value.trim().replace(/\s+/g, " ");
@@ -13,12 +15,13 @@ function assertValidName(value: string, field: string) {
   const normalized = normalizeName(value);
 
   if (!normalized) {
-    throw new ScorecardServiceError(`${field} is required.`);
+    throw new ScorecardServiceError(`${field} is required.`, "VALIDATION_ERROR");
   }
 
   if (normalized.length > 200) {
     throw new ScorecardServiceError(
       `${field} must be 200 characters or fewer.`,
+      "VALIDATION_ERROR",
     );
   }
 
@@ -36,12 +39,15 @@ function assertPositiveWeight(weight: number) {
 
 function assertWeightTotal(total: number) {
   if (total > 100.000001) {
-    throw new ScorecardServiceError("The total weight cannot exceed 100%.");
+    throw new ScorecardServiceError(
+      "The total weight cannot exceed 100%.",
+      "VALIDATION_ERROR",
+    );
   }
 }
 
 function assertAdmin(actor: ScorecardActor) {
-  if (actor.role !== "admin") {
+  if (actor.role !== UserRole.ADMIN) {
     throw new ScorecardServiceError(
       "Only administrators can modify scorecard structure.",
       "FORBIDDEN",
@@ -74,7 +80,7 @@ async function getAuthorizedScorecard(
   }
 
   if (
-    actor.role !== "admin" &&
+    actor.role !== UserRole.ADMIN &&
     (!actor.departmentId || actor.departmentId !== scorecard.departmentId)
   ) {
     throw new ScorecardServiceError(

@@ -2,6 +2,7 @@
 
 import { auth } from "@/auth";
 import { revalidatePath } from "next/cache";
+import { UserRole } from "@/generated/prisma";
 
 import {
   createScorecard,
@@ -52,9 +53,13 @@ async function getActor() {
     throw new ScorecardServiceError("User account not found.", "UNAUTHORIZED");
   }
 
+  if (user.role !== UserRole.ADMIN && user.role !== UserRole.USER) {
+    throw new ScorecardServiceError("Invalid user role.", "UNAUTHORIZED");
+  }
+
   return {
     userId: user.id,
-    role: String(user.role),
+    role: user.role,
     departmentId: user.departmentId,
   };
 }

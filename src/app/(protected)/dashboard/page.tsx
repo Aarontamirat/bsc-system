@@ -6,7 +6,6 @@ import {
   Building2,
   CalendarDays,
   ShieldCheck,
-  UsersRound,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -17,252 +16,274 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-
 import { PageHeader } from "@/components/page-header";
-
-import { getCurrentFiscalYear } from "@/lib/bsc-calculations";
-
-import { requireUser } from "@/lib/auth-guards";
-
+import {
+  calculateScorecard,
+  getCurrentFiscalYear,
+} from "@/lib/bsc-calculations";
+import { getScorecardActorOrRedirect } from "@/lib/scorecard-actor";
+import { getMonthlyWorkspace } from "@/lib/services/monthly-data.service";
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
-export default async function DashboardPage() {
-  const user = await requireUser();
+function formatNumber(value: number | null): string {
+  if (value === null) {
+    return "Not ready";
+  }
 
+  return new Intl.NumberFormat("en", {
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+function scoreBadge(score: number | null) {
+  if (score === null) {
+    return {
+      label: "Incomplete",
+      className: "border-slate-200 bg-slate-50 text-slate-600",
+    };
+  }
+
+  if (score >= 100) {
+    return {
+      label: "On track",
+      className: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    };
+  }
+
+  if (score >= 80) {
+    return {
+      label: "Watch",
+      className: "border-amber-200 bg-amber-50 text-amber-700",
+    };
+  }
+
+  return {
+    label: "Behind",
+    className: "border-red-200 bg-red-50 text-red-700",
+  };
+}
+
+export default async function DashboardPage() {
+  const actor = await getScorecardActorOrRedirect();
   const fiscalYear = getCurrentFiscalYear();
 
-  const [department, scorecardCount, userCount, activityCount] =
-    await Promise.all([
-      prisma.department.findUnique({
-        where: {
-          id: user.departmentId,
-        },
-        select: {
-          id: true,
-          name: true,
-          description: true,
-        },
-      }),
+  const scorecard = await prisma.scorecard.findFirst({
+    where: {
+      year: fiscalYear,
+      ...(actor.role === "ADMIN" ? {} : { departmentId: actor.departmentId }),
+    },
+    orderBy: {
+      updatedAt: "desc",
+    },
+    select: {
+      id: true,
+    },
+  });
 
-      prisma.scorecard.count({
-        where: {
-          departmentId: user.departmentId,
-        },
-      }),
+  const workspace = await getMonthlyWorkspace(actor, scorecard?.id);
+  const selected = workspace.selectedScorecard;
+  const activities = workspace.perspectives.flatMap((perspective) =>
+    perspective.objectives.flatMap((objective) => objective.activities),
+  );
 
-      user.role === "ADMIN"
-        ? prisma.user.count({
-            where: {
-              isActive: true,
-            },
-          })
-        : Promise.resolve(null),
+  let overallScore: number | null = null;
 
-      prisma.activity.count({
-        where: {
-          objective: {
-            perspective: {
-              scorecard: {
-                departmentId: user.departmentId,
-              },
-            },
-          },
-        },
-      }),
-    ]);
+  try {
+    const result = calculateScorecard({
+      perspectives: workspace.perspectives.map((perspective) => ({
+        name: perspective.name,
+        weight: perspective.weight,
+        objectives: perspective.objectives.map((objective) => ({
+          name: objective.name,
+          weight: objective.weight,
+          activities: objective.activities.map((activity) => ({
+            unitOfMeasure: activity.unitOfMeasure,
+            weight: activity.weight,
+            plan: activity.annualPlan,
+            actual: activity.annualActual,
+          })),
+        })),
+      })),
+    });
+
+    overallScore = Number(result.score);
+  } catch {
+    overallScore = null;
+  }
+
+  const badge = scoreBadge(overallScore);
+  const plannedActivities = activities.filter(
+    (activity) => activity.annualPlan > 0,
+  ).length;
+  const actualActivities = activities.filter(
+    (activity) => activity.annualActual > 0,
+  ).length;
 
   return (
     <div>
       <PageHeader
-        eyebrow={`Fiscal Year ${fiscalYear}`}
+        eyebrow={`Fiscal Year ${fiscalYear}/${fiscalYear + 1}`}
         title="Performance command centre"
-        description="A controlled view of the current department scorecard environment."
+        description="Live scorecard performance based on persisted monthly plans and actuals."
       />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Card className="rounded-2xl border-slate-200 shadow-sm">
+        <Card>
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
-              <CardDescription>Department</CardDescription>
-
-              <div className="rounded-xl bg-sky-50 p-2.5 text-sky-600">
-                <Building2 className="h-4 w-4" />
-              </div>
-            </div>
-          </CardHeader>
-
-          <CardContent>
-            <CardTitle className="truncate text-xl">
-              {department?.name ?? "Unknown"}
-            </CardTitle>
-
-            <p className="mt-1 text-xs text-slate-500">
-              Assigned organisational unit
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl border-slate-200 shadow-sm">
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardDescription>Scorecards</CardDescription>
-
-              <div className="rounded-xl bg-violet-50 p-2.5 text-violet-600">
+              <CardDescription>Overall score</CardDescription>
+              <div className="rounded-lg bg-emerald-50 p-2 text-emerald-600">
                 <BarChart3 className="h-4 w-4" />
               </div>
             </div>
           </CardHeader>
-
           <CardContent>
-            <CardTitle className="text-3xl">{scorecardCount}</CardTitle>
-
-            <p className="mt-1 text-xs text-slate-500">Department scorecards</p>
+            <CardTitle className="text-3xl">
+              {formatNumber(overallScore)}
+            </CardTitle>
+            <Badge variant="outline" className={`mt-3 ${badge.className}`}>
+              {badge.label}
+            </Badge>
           </CardContent>
         </Card>
 
-        <Card className="rounded-2xl border-slate-200 shadow-sm">
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardDescription>Department</CardDescription>
+              <div className="rounded-lg bg-sky-50 p-2 text-sky-600">
+                <Building2 className="h-4 w-4" />
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <CardTitle className="truncate text-xl">
+              {selected?.departmentName ?? "No scorecard"}
+            </CardTitle>
+            <p className="mt-1 text-xs text-slate-500">
+              {selected
+                ? `FY${selected.year}/${selected.year + 1}`
+                : "Create a scorecard to begin"}
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
               <CardDescription>Activities</CardDescription>
-
-              <div className="rounded-xl bg-emerald-50 p-2.5 text-emerald-600">
+              <div className="rounded-lg bg-violet-50 p-2 text-violet-600">
                 <Activity className="h-4 w-4" />
               </div>
             </div>
           </CardHeader>
-
           <CardContent>
-            <CardTitle className="text-3xl">{activityCount}</CardTitle>
-
+            <CardTitle className="text-3xl">{activities.length}</CardTitle>
             <p className="mt-1 text-xs text-slate-500">
-              Activities in your department
+              {plannedActivities} with monthly plans
             </p>
           </CardContent>
         </Card>
 
-        <Card className="rounded-2xl border-slate-200 shadow-sm">
+        <Card>
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
-              <CardDescription>Current FY</CardDescription>
-
-              <div className="rounded-xl bg-amber-50 p-2.5 text-amber-600">
+              <CardDescription>Actual coverage</CardDescription>
+              <div className="rounded-lg bg-amber-50 p-2 text-amber-600">
                 <CalendarDays className="h-4 w-4" />
               </div>
             </div>
           </CardHeader>
-
           <CardContent>
-            <CardTitle className="text-3xl">{fiscalYear}</CardTitle>
-
+            <CardTitle className="text-3xl">{actualActivities}</CardTitle>
             <p className="mt-1 text-xs text-slate-500">
-              July {fiscalYear} — June {fiscalYear + 1}
+              Activities with actual values
             </p>
           </CardContent>
         </Card>
       </div>
 
-      <div className="mt-6 grid gap-6 lg:grid-cols-[1.25fr_0.75fr]">
-        <Card className="rounded-2xl border-slate-200 shadow-sm">
+      <div className="mt-6 grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+        <Card>
           <CardHeader>
-            <CardTitle>Application workspace</CardTitle>
-
+            <CardTitle>Perspective performance</CardTitle>
             <CardDescription>
-              Core BSC modules are being connected to this shell in the next
-              implementation phase.
+              Calculated from consolidated annual plan and actual values.
             </CardDescription>
           </CardHeader>
-
-          <CardContent>
-            <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6">
-              <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="font-semibold text-slate-900">
-                    Scorecard architecture is ready
-                  </p>
-
-                  <p className="mt-1 max-w-xl text-sm leading-6 text-slate-500">
-                    The authentication, database, fiscal calendar, calculation
-                    engine, authorization layer and responsive application shell
-                    are now connected.
-                  </p>
-                </div>
-
-                <Badge className="w-fit rounded-full px-3 py-1">
-                  Foundation Ready
-                </Badge>
+          <CardContent className="space-y-4">
+            {workspace.perspectives.length === 0 ? (
+              <div className="rounded-lg border border-dashed p-6 text-sm text-slate-500">
+                No scorecard structure is available for the selected context.
               </div>
-            </div>
+            ) : (
+              workspace.perspectives.map((perspective) => {
+                const perspectiveActivities = perspective.objectives.flatMap(
+                  (objective) => objective.activities,
+                );
+                const averageAchievement =
+                  perspectiveActivities.length === 0
+                    ? null
+                    : perspectiveActivities.reduce(
+                        (total, activity) =>
+                          total + (activity.achievementPercent ?? 0),
+                        0,
+                      ) / perspectiveActivities.length;
+
+                return (
+                  <div key={perspective.id} className="rounded-lg border p-4">
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <p className="font-semibold">{perspective.name}</p>
+                        <p className="text-xs text-slate-500">
+                          {perspectiveActivities.length} activities
+                        </p>
+                      </div>
+                      <Badge variant="outline">
+                        {formatNumber(averageAchievement)}
+                        {averageAchievement === null ? "" : "%"}
+                      </Badge>
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </CardContent>
         </Card>
 
-        <Card className="rounded-2xl border-slate-200 shadow-sm">
+        <Card>
           <CardHeader>
             <CardTitle>Access context</CardTitle>
-
-            <CardDescription>
-              Current authenticated security context
-            </CardDescription>
+            <CardDescription>Authenticated server-side identity</CardDescription>
           </CardHeader>
-
           <CardContent className="space-y-4">
             <div className="flex items-center gap-3">
-              <div className="rounded-xl bg-slate-100 p-2.5">
+              <div className="rounded-lg bg-slate-100 p-2.5">
                 <ShieldCheck className="h-4 w-4 text-slate-700" />
               </div>
-
               <div>
-                <p className="text-sm font-semibold text-slate-900">
-                  {user.username}
-                </p>
-
-                <p className="text-xs text-slate-500">
-                  {user.role === "ADMIN"
+                <p className="text-sm font-semibold">
+                  {actor.role === "ADMIN"
                     ? "System Administrator"
                     : "Department User"}
                 </p>
+                <p className="text-xs text-slate-500">
+                  Server actions re-check this role for every mutation.
+                </p>
               </div>
             </div>
 
-            {user.role === "ADMIN" ? (
-              <div className="flex items-center gap-3">
-                <div className="rounded-xl bg-slate-100 p-2.5">
-                  <UsersRound className="h-4 w-4 text-slate-700" />
-                </div>
-
-                <div>
-                  <p className="text-sm font-semibold text-slate-900">
-                    {userCount ?? 0}
-                  </p>
-
-                  <p className="text-xs text-slate-500">Active system users</p>
-                </div>
-              </div>
-            ) : null}
+            <Link
+              href="/data-entry"
+              className="inline-flex items-center gap-2 text-sm font-semibold text-sky-600 hover:text-sky-700">
+              Open plans and actuals
+              <ArrowRight className="h-4 w-4" />
+            </Link>
           </CardContent>
         </Card>
       </div>
-
-      <Card className="mt-6 rounded-2xl border-slate-200 shadow-sm">
-        <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
-          <div>
-            <p className="font-semibold text-slate-900">Fiscal calendar</p>
-
-            <p className="mt-1 text-sm text-slate-500">
-              July is month 0 and June is month 11 throughout the BSC
-              calculation engine.
-            </p>
-          </div>
-
-          <Link
-            href="/dashboard"
-            className="inline-flex w-fit items-center gap-2 text-sm font-semibold text-sky-600 transition hover:text-sky-700">
-            Current dashboard
-            <ArrowRight className="h-4 w-4" />
-          </Link>
-        </CardContent>
-      </Card>
     </div>
   );
 }

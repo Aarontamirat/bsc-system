@@ -1,9 +1,12 @@
+import "server-only";
+
 import { prisma } from "@/lib/prisma";
+import { UserRole } from "@/generated/prisma/client";
 
 export type ScorecardActor = {
   userId: string;
-  role: string;
-  departmentId: string | null;
+  role: UserRole;
+  departmentId: string;
 };
 
 export type CreateScorecardInput = {
@@ -24,7 +27,7 @@ export class ScorecardServiceError extends Error {
       | "FORBIDDEN"
       | "NOT_FOUND"
       | "CONFLICT"
-      | "VALIDATION_ERROR" = "VALIDATION_ERROR",
+      | "VALIDATION_ERROR",
   ) {
     super(message);
     this.name = "ScorecardServiceError";
@@ -55,7 +58,7 @@ const SCORECARD_INCLUDE = {
 } as const;
 
 function assertAdmin(actor: ScorecardActor): void {
-  if (actor.role !== "admin") {
+  if (actor.role !== UserRole.ADMIN) {
     throw new ScorecardServiceError(
       "Only administrators can modify scorecards.",
       "FORBIDDEN",
@@ -67,7 +70,7 @@ function assertDepartmentAccess(
   actor: ScorecardActor,
   departmentId: string,
 ): void {
-  if (actor.role === "admin") {
+  if (actor.role === UserRole.ADMIN) {
     return;
   }
 
@@ -135,7 +138,7 @@ export async function getScorecards(actor: ScorecardActor, year?: number) {
   }
 
   const where =
-    actor.role === "admin"
+    actor.role === UserRole.ADMIN
       ? {
           ...(year !== undefined ? { year } : {}),
         }
@@ -351,15 +354,36 @@ export async function validateScorecardWeights(
 ): Promise<{ valid: true }> {
   const scorecard = await getScorecardById(actor, scorecardId);
 
+  if (scorecard.perspectives.length === 0) {
+    throw new ScorecardServiceError(
+      "Scorecard must contain at least one perspective.",
+      "VALIDATION_ERROR",
+    );
+  }
+
   assertWeightTotal(scorecard.perspectives, "Perspective");
 
   for (const perspective of scorecard.perspectives) {
+    if (perspective.objectives.length === 0) {
+      throw new ScorecardServiceError(
+        `Perspective "${perspective.name}" must contain at least one objective.`,
+        "VALIDATION_ERROR",
+      );
+    }
+
     assertWeightTotal(
       perspective.objectives,
       `Objectives under "${perspective.name}"`,
     );
 
     for (const objective of perspective.objectives) {
+      if (objective.activities.length === 0) {
+        throw new ScorecardServiceError(
+          `Objective "${objective.name}" must contain at least one activity.`,
+          "VALIDATION_ERROR",
+        );
+      }
+
       assertWeightTotal(
         objective.activities,
         `Activities under "${objective.name}"`,
