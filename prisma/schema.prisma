@@ -1,0 +1,209 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  ADMIN
+  USER
+}
+
+enum UnitOfMeasure {
+  PERCENT
+  COUNT
+  NUMBER
+  MINUTE
+  HOUR
+}
+
+model Department {
+  id          String   @id @default(uuid())
+  name        String   @unique(map: "departments_name_key") @db.VarChar(150)
+  description String?  @db.Text
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users                 User[]
+  scorecards            Scorecard[]
+  responsibleActivities ActivityResponsibleUnit[]
+
+  @@index([isActive], map: "departments_is_active_idx")
+  @@map("departments")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  username     String   @unique(map: "users_username_key") @db.VarChar(80)
+  passwordHash String   @db.VarChar(255)
+  role         UserRole @default(USER)
+  departmentId String
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  department Department @relation( fields: [departmentId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  createdMonthlyPlans   MonthlyPlan[]   @relation("MonthlyPlanCreatedBy")
+  updatedMonthlyPlans   MonthlyPlan[]   @relation("MonthlyPlanUpdatedBy")
+  createdMonthlyActuals MonthlyActual[] @relation("MonthlyActualCreatedBy")
+  updatedMonthlyActuals MonthlyActual[] @relation("MonthlyActualUpdatedBy")
+
+  @@index([departmentId], map: "users_department_id_idx")
+  @@index([departmentId, isActive], map: "users_department_active_idx")
+  @@map("users")
+}
+
+model Scorecard {
+  id           String   @id @default(uuid())
+  departmentId String
+  year         Int
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  department Department @relation(fields: [departmentId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  perspectives   Perspective[]
+  monthlyPlans   MonthlyPlan[]
+  monthlyActuals MonthlyActual[]
+
+  @@unique([departmentId, year], map: "scorecards_department_year_key")
+  @@index([departmentId], map: "scorecards_department_id_idx")
+  @@index([year], map: "scorecards_year_idx")
+  @@map("scorecards")
+}
+
+model Perspective {
+  id          String   @id @default(uuid())
+  scorecardId String
+  name        String   @db.VarChar(150)
+  weight      Decimal  @db.Decimal(7, 4)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  scorecard Scorecard @relation(fields: [scorecardId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  objectives Objective[]
+
+  @@unique([scorecardId, name], map: "perspectives_scorecard_name_key")
+  @@index([scorecardId, sortOrder], map: "perspectives_scorecard_sort_idx")
+  @@map("perspectives")
+}
+
+model Objective {
+  id            String   @id @default(uuid())
+  perspectiveId String
+  name          String   @db.VarChar(200)
+  weight        Decimal  @db.Decimal(7, 4)
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  perspective Perspective @relation(fields: [perspectiveId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  activities Activity[]
+
+  @@unique([perspectiveId, name], map: "objectives_perspective_name_key")
+  @@index([perspectiveId, sortOrder], map: "objectives_perspective_sort_idx")
+  @@map("objectives")
+}
+
+model Activity {
+  id            String        @id @default(uuid())
+  objectiveId   String
+  name          String        @db.VarChar(250)
+  weight        Decimal       @db.Decimal(7, 4)
+  unitOfMeasure UnitOfMeasure
+  annualTarget  Decimal       @db.Decimal(18, 4)
+  baseline      Decimal       @db.Decimal(18, 4)
+  remark        String?       @db.Text
+  sortOrder     Int           @default(0)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  objective Objective @relation(fields: [objectiveId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  responsibleUnits ActivityResponsibleUnit[]
+
+  monthlyPlans   MonthlyPlan[]
+  monthlyActuals MonthlyActual[]
+
+  @@unique([objectiveId, name], map: "activities_objective_name_key")
+  @@index([objectiveId, sortOrder], map: "activities_objective_sort_idx")
+  @@map("activities")
+}
+
+model ActivityResponsibleUnit {
+  activityId   String
+  departmentId String
+  createdAt    DateTime @default(now())
+
+  activity Activity @relation(fields: [activityId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  department Department @relation(fields: [departmentId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@id([activityId, departmentId], map: "activity_responsible_units_pkey")
+  @@index([departmentId], map: "activity_responsible_units_department_idx")
+  @@map("activity_responsible_units")
+}
+
+model MonthlyPlan {
+  id           String  @id @default(uuid())
+  scorecardId  String
+  activityId   String
+  year         Int
+  monthIndex   Int
+  plannedValue Decimal @db.Decimal(18, 4)
+
+  createdByUserId String?
+  updatedByUserId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  scorecard Scorecard @relation(fields: [scorecardId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  activity Activity @relation(fields: [activityId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  createdByUser User? @relation("MonthlyPlanCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  updatedByUser User? @relation("MonthlyPlanUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@unique([scorecardId, activityId, year, monthIndex], map: "monthly_plans_scorecard_activity_year_month_index_key")
+  @@index([scorecardId, year, monthIndex], map: "monthly_plans_scorecard_year_month_idx")
+  @@index([activityId, year, monthIndex], map: "monthly_plans_activity_year_month_idx")
+  @@map("monthly_plans")
+}
+
+model MonthlyActual {
+  id          String  @id @default(uuid())
+  scorecardId String
+  activityId  String
+  year        Int
+  month       Int
+  actualValue Decimal @db.Decimal(18, 4)
+
+  createdByUserId String?
+  updatedByUserId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  scorecard Scorecard @relation(fields: [scorecardId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  activity Activity @relation(fields: [activityId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  createdByUser User? @relation("MonthlyActualCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  updatedByUser User? @relation("MonthlyActualUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@unique([scorecardId, activityId, year, month], map: "monthly_actuals_scorecard_activity_year_month_key")
+  @@index([scorecardId, year, month], map: "monthly_actuals_scorecard_year_month_idx")
+  @@index([activityId, year, month], map: "monthly_actuals_activity_year_month_idx")
+  @@map("monthly_actuals")
+}
