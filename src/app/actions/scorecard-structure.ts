@@ -1,9 +1,7 @@
 "use server";
 
-import { auth } from "@/auth";
-import { prisma } from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
-import { UnitOfMeasure, UserRole } from "@/generated/prisma";
+import { UnitOfMeasure } from "@/generated/prisma";
 
 import {
   createActivity,
@@ -22,6 +20,7 @@ import {
   ScorecardServiceError,
   type ScorecardActor,
 } from "@/lib/services/scorecard.service";
+import { getScorecardActor } from "@/lib/scorecard-actor";
 
 type ActionResult<T = unknown> =
   | {
@@ -35,36 +34,7 @@ type ActionResult<T = unknown> =
     };
 
 async function getActor(): Promise<ScorecardActor> {
-  const session = await auth();
-
-  if (!session?.user?.id) {
-    throw new ScorecardServiceError("You must be signed in.", "UNAUTHORIZED");
-  }
-
-  const user = await prisma.user.findUnique({
-    where: {
-      id: session.user.id,
-    },
-    select: {
-      id: true,
-      role: true,
-      departmentId: true,
-    },
-  });
-
-  if (!user) {
-    throw new ScorecardServiceError("User account not found.", "NOT_FOUND");
-  }
-
-  if (user.role !== UserRole.ADMIN && user.role !== UserRole.USER) {
-    throw new ScorecardServiceError("Invalid user role.", "UNAUTHORIZED");
-  }
-
-  return {
-    userId: user.id,
-    role: user.role,
-    departmentId: user.departmentId,
-  };
+  return getScorecardActor();
 }
 
 function handleError(error: unknown): ActionResult {
@@ -261,6 +231,7 @@ export async function createActivityAction(input: {
   annualTarget: number;
   baseline?: number;
   remark?: string;
+  responsibleDepartmentIds: string[];
 }): Promise<ActionResult> {
   try {
     const actor = await getActor();
@@ -288,6 +259,7 @@ export async function updateActivityAction(input: {
   annualTarget: number;
   baseline?: number;
   remark?: string;
+  responsibleDepartmentIds: string[];
 }): Promise<ActionResult> {
   try {
     const actor = await getActor();

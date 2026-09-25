@@ -1,6 +1,6 @@
 "use client";
 
-import { LogOut, ShieldCheck, UserRound } from "lucide-react";
+import { LogOut, UserRound } from "lucide-react";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 import { logout } from "@/app/actions/auth";
+import Link from "next/link";
 
 type UserMenuProps = {
   username: string;
@@ -59,7 +60,9 @@ export function UserMenu({ username, role }: UserMenuProps) {
         }
       />
 
-      <DropdownMenuContent align="end" className="w-60 rounded-2xl p-2">
+      <DropdownMenuContent
+        align="end"
+        className="w-60 rounded-2xl p-2 bg-slate-50">
         <DropdownMenuLabel className="px-3 py-2">
           <div className="flex items-center gap-3">
             <Avatar className="h-9 w-9">
@@ -78,17 +81,12 @@ export function UserMenu({ username, role }: UserMenuProps) {
 
         <DropdownMenuSeparator />
 
-        <DropdownMenuItem disabled className="gap-3 rounded-xl px-3 py-2.5">
-          <UserRound className="h-4 w-4" />
-
-          <span>Account</span>
-        </DropdownMenuItem>
-
-        <DropdownMenuItem disabled className="gap-3 rounded-xl px-3 py-2.5">
-          <ShieldCheck className="h-4 w-4" />
-
-          <span>Security</span>
-        </DropdownMenuItem>
+        <Link href="/admin/users">
+          <DropdownMenuItem className="gap-3 rounded-xl px-3 py-2.5 hover:cursor-pointer hover:bg-(--accent) transition-all duration-300">
+            <UserRound className="h-4 w-4" />
+            <span>Account</span>
+          </DropdownMenuItem>
+        </Link>
 
         <DropdownMenuSeparator />
 

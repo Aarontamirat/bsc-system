@@ -1,4 +1,5 @@
 import { PageHeader } from "@/components/page-header";
+import { redirect } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,6 +9,7 @@ import {
   updateDepartmentAction,
 } from "@/app/actions/admin";
 import { listDepartments } from "@/lib/services/admin.service";
+import { getScorecardActorOrRedirect } from "@/lib/scorecard-actor";
 
 export const dynamic = "force-dynamic";
 
@@ -22,14 +24,24 @@ export default async function DepartmentsPage({
   searchParams,
 }: DepartmentsPageProps) {
   const params = await searchParams;
-  const departments = await listDepartments();
+  const actor = await getScorecardActorOrRedirect();
+
+  if (actor.role !== "ADMIN") {
+    redirect("/dashboard");
+  }
+
+  const departments = await listDepartments(actor);
 
   return (
     <div className="space-y-6">
       <PageHeader
         eyebrow="Administration"
         title="Departments"
-        description="Manage organizational departments without deleting referenced BSC history."
+        description={
+          actor.canAdministerAllDepartments
+            ? "Manage organizational departments without deleting referenced BSC history."
+            : "Manage your department profile and its active status."
+        }
       />
 
       {params.message ? (
@@ -43,28 +55,30 @@ export default async function DepartmentsPage({
         </div>
       ) : null}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Create department</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form action={createDepartmentAction} className="grid gap-3 md:grid-cols-[1fr_2fr_auto]">
-            <input
-              name="name"
-              required
-              maxLength={150}
-              placeholder="Department name"
-              className="h-9 rounded-md border border-slate-200 px-3 text-sm"
-            />
-            <input
-              name="description"
-              placeholder="Description"
-              className="h-9 rounded-md border border-slate-200 px-3 text-sm"
-            />
-            <Button type="submit">Create</Button>
-          </form>
-        </CardContent>
-      </Card>
+      {actor.canAdministerAllDepartments ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Create department</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form action={createDepartmentAction} className="grid gap-3 md:grid-cols-[1fr_2fr_auto]">
+              <input
+                name="name"
+                required
+                maxLength={150}
+                placeholder="Department name"
+                className="h-9 rounded-md border border-slate-200 px-3 text-sm"
+              />
+              <input
+                name="description"
+                placeholder="Description"
+                className="h-9 rounded-md border border-slate-200 px-3 text-sm"
+              />
+              <Button type="submit">Create</Button>
+            </form>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <div className="space-y-4">
         {departments.map((department) => {

@@ -1,9 +1,8 @@
 import { notFound, redirect } from "next/navigation";
 
-import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { UserRole } from "@/generated/prisma";
 
+import { getScorecardActorOrRedirect } from "@/lib/scorecard-actor";
 import { getScorecardStructure } from "@/lib/services/scorecard-structure.service";
 import { ScorecardServiceError } from "@/lib/services/scorecard.service";
 
@@ -20,50 +19,45 @@ function decimalToNumber(value: unknown): number {
 }
 
 export default async function ScorecardPage({ params }: ScorecardPageProps) {
-  const session = await auth();
-
-  if (!session?.user?.id) {
-    redirect("/login");
-  }
-
   const { scorecardId } = await params;
+  const actor = await getScorecardActorOrRedirect();
 
-  const user = await prisma.user.findUnique({
-    where: {
-      id: session.user.id,
+  const structure = await getScorecardStructure(actor, scorecardId).catch(
+    (error: unknown) => {
+      if (
+        error instanceof ScorecardServiceError &&
+        error.code === "NOT_FOUND"
+      ) {
+        notFound();
+      }
+
+      if (
+        error instanceof ScorecardServiceError &&
+        error.code === "FORBIDDEN"
+      ) {
+        redirect("/scorecards");
+      }
+
+      throw error;
     },
-    select: {
-      role: true,
-      departmentId: true,
-    },
-  });
-
-  if (!user) {
-    redirect("/login");
-  }
-
-  const structure = await getScorecardStructure(
-    {
-      userId: session.user.id,
-      role: user.role,
-      departmentId: user.departmentId,
-    },
-    scorecardId,
-  ).catch((error: unknown) => {
-    if (error instanceof ScorecardServiceError && error.code === "NOT_FOUND") {
-      notFound();
-    }
-
-    if (error instanceof ScorecardServiceError && error.code === "FORBIDDEN") {
-      redirect("/scorecards");
-    }
-
-    throw error;
-  });
+  );
 
   if (!structure) {
     notFound();
   }
+
+  const departments = await prisma.department.findMany({
+    where: {
+      isActive: true,
+    },
+    select: {
+      id: true,
+      name: true,
+    },
+    orderBy: {
+      name: "asc",
+    },
+  });
 
   const editorData = {
     id: structure.id,
@@ -93,12 +87,23 @@ export default async function ScorecardPage({ params }: ScorecardPageProps) {
           baseline: decimalToNumber(activity.baseline),
           remark: activity.remark,
           sortOrder: activity.sortOrder,
+          responsibleDepartmentIds: activity.responsibleUnits.map(
+            (unit) => unit.departmentId,
+          ),
+          responsibleUnits: activity.responsibleUnits.map((unit) => ({
+            id: unit.department.id,
+            name: unit.department.name,
+          })),
         })),
       })),
     })),
   };
 
   return (
-    <ScorecardEditor data={editorData} canEdit={user.role === UserRole.ADMIN} />
+    <ScorecardEditor
+      data={editorData}
+      departments={departments}
+      canEdit={actor.role === "ADMIN"}
+    />
   );
 }

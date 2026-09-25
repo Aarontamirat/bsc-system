@@ -70,7 +70,7 @@ function assertMonthlyValue(input: MonthlyValueInput): void {
 }
 
 function accessibleScorecardWhere(actor: ScorecardActor) {
-  return actor.role === UserRole.ADMIN
+  return actor.canAdministerAllDepartments
     ? {}
     : {
         departmentId: actor.departmentId,

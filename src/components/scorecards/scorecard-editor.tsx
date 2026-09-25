@@ -16,12 +16,12 @@ import {
   Scale,
   Target,
   Trash2,
-  X,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -40,7 +40,10 @@ import {
   updatePerspectiveAction,
 } from "@/app/actions/scorecard-structure";
 
-import { validateScorecardAction } from "@/app/actions/scorecard";
+import {
+  deleteScorecardAction,
+  validateScorecardAction,
+} from "@/app/actions/scorecard";
 
 type UnitOfMeasure = "PERCENT" | "COUNT" | "NUMBER" | "MINUTE" | "HOUR";
 
@@ -54,6 +57,11 @@ type ActivityNode = {
   baseline: number;
   remark: string | null;
   sortOrder: number;
+  responsibleDepartmentIds: string[];
+  responsibleUnits: Array<{
+    id: string;
+    name: string;
+  }>;
 };
 
 type ObjectiveNode = {
@@ -80,8 +88,14 @@ type ScorecardEditorData = {
   perspectives: PerspectiveNode[];
 };
 
+type DepartmentOption = {
+  id: string;
+  name: string;
+};
+
 interface ScorecardEditorProps {
   data: ScorecardEditorData;
+  departments: DepartmentOption[];
   canEdit: boolean;
 }
 
@@ -154,6 +168,9 @@ const activitySchema = z.object({
     .gte(0, "Baseline cannot be negative."),
 
   remark: z.string().max(500, "Maximum 500 characters.").optional(),
+  responsibleDepartmentIds: z
+    .array(z.string().uuid())
+    .min(1, "Select at least one responsible unit."),
 });
 
 type PerspectiveFormValues = z.infer<typeof perspectiveSchema>;
@@ -334,7 +351,7 @@ function PerspectiveForm({
   return (
     <form
       onSubmit={form.handleSubmit(onSubmit)}
-      className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      className="mt-4 rounded-2xl border border-slate-200 bg-(--background) p-4 shadow-sm">
       <div className="mb-4">
         <p className="text-sm font-semibold text-slate-900">
           {editing ? "Edit perspective" : "Add perspective"}
@@ -453,7 +470,7 @@ function ObjectiveForm({
 
           <Input
             id="objective-name"
-            className="mt-2 bg-white"
+            className="mt-2 bg-(--background)"
             placeholder="Enter objective"
             {...form.register("name")}
           />
@@ -466,7 +483,7 @@ function ObjectiveForm({
 
           <Input
             id="objective-weight"
-            className="mt-2 bg-white"
+            className="mt-2 bg-(--background)"
             type="number"
             min="0.01"
             max="100"
@@ -493,6 +510,7 @@ function ActivityForm({
   scorecardId,
   objectiveId,
   activity,
+  departments,
   onClose,
   onSaved,
   onError,
@@ -500,6 +518,7 @@ function ActivityForm({
   scorecardId: string;
   objectiveId: string;
   activity?: ActivityNode;
+  departments: DepartmentOption[];
   onClose: () => void;
   onSaved: () => void;
   onError: (message: string) => void;
@@ -516,7 +535,14 @@ function ActivityForm({
       annualTarget: activity?.annualTarget ?? 0,
       baseline: activity?.baseline ?? 0,
       remark: activity?.remark ?? "",
+      responsibleDepartmentIds: activity?.responsibleDepartmentIds ?? [],
     },
+  });
+
+  const responsibleDepartmentIds = useWatch({
+    control: form.control,
+    name: "responsibleDepartmentIds",
+    defaultValue: activity?.responsibleDepartmentIds ?? [],
   });
 
   async function onSubmit(values: ActivityFormValues) {
@@ -530,6 +556,7 @@ function ActivityForm({
         annualTarget: values.annualTarget,
         baseline: values.baseline,
         remark: values.remark ?? "",
+        responsibleDepartmentIds: values.responsibleDepartmentIds,
       };
 
       const result = editing
@@ -558,7 +585,7 @@ function ActivityForm({
   return (
     <form
       onSubmit={form.handleSubmit(onSubmit)}
-      className="mt-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      className="mt-3 rounded-2xl border border-slate-200 bg-(--background) p-4 shadow-sm">
       <div className="mb-4">
         <p className="text-sm font-semibold text-slate-900">
           {editing ? "Edit activity" : "Add activity"}
@@ -659,6 +686,42 @@ function ActivityForm({
         <FieldError message={form.formState.errors.remark?.message} />
       </div>
 
+      <fieldset className="mt-4">
+        <legend className="text-sm font-medium">Responsible units</legend>
+        <div className="mt-2 grid max-h-44 gap-2 overflow-y-auto rounded-md border border-input bg-background p-3 sm:grid-cols-2">
+          {departments.map((department) => {
+            const selected = (responsibleDepartmentIds || []).includes(
+              department.id,
+            );
+
+            return (
+              <label
+                key={department.id}
+                className="flex min-w-0 cursor-pointer items-center gap-2 rounded px-1 py-1 text-sm hover:bg-slate-50">
+                <input
+                  type="checkbox"
+                  checked={selected}
+                  onChange={(event) => {
+                    const current = form.getValues("responsibleDepartmentIds");
+                    form.setValue(
+                      "responsibleDepartmentIds",
+                      event.target.checked
+                        ? [...current, department.id]
+                        : current.filter((id) => id !== department.id),
+                      { shouldValidate: true },
+                    );
+                  }}
+                />
+                <span className="truncate">{department.name}</span>
+              </label>
+            );
+          })}
+        </div>
+        <FieldError
+          message={form.formState.errors.responsibleDepartmentIds?.message}
+        />
+      </fieldset>
+
       <div className="mt-4">
         <FormActions
           pending={pending}
@@ -670,7 +733,11 @@ function ActivityForm({
   );
 }
 
-export function ScorecardEditor({ data, canEdit }: ScorecardEditorProps) {
+export function ScorecardEditor({
+  data,
+  departments,
+  canEdit,
+}: ScorecardEditorProps) {
   const router = useRouter();
 
   const [expandedPerspectives, setExpandedPerspectives] = useState<Set<string>>(
@@ -682,11 +749,6 @@ export function ScorecardEditor({ data, canEdit }: ScorecardEditorProps) {
   );
 
   const [target, setTarget] = useState<EditorTarget>(null);
-
-  const [feedback, setFeedback] = useState<{
-    type: "success" | "error";
-    message: string;
-  } | null>(null);
 
   const [validationPending, setValidationPending] = useState(false);
 
@@ -776,24 +838,16 @@ export function ScorecardEditor({ data, canEdit }: ScorecardEditorProps) {
 
   function closeEditor() {
     setTarget(null);
-    setFeedback(null);
   }
 
   function handleSaved(message: string) {
     setTarget(null);
-    setFeedback({
-      type: "success",
-      message,
-    });
-
+    toast.success(message);
     router.refresh();
   }
 
   function handleError(message: string) {
-    setFeedback({
-      type: "error",
-      message,
-    });
+    toast.error(message);
   }
 
   async function removePerspective(perspective: PerspectiveNode) {
@@ -852,43 +906,55 @@ export function ScorecardEditor({ data, canEdit }: ScorecardEditorProps) {
 
   async function validateStructure() {
     setValidationPending(true);
-    setFeedback(null);
 
     try {
       const result = await validateScorecardAction(data.id);
 
       if (!result.success) {
-        setFeedback({
-          type: "error",
-          message: result.message,
-        });
-
+        toast.error(result.message);
         return;
       }
 
-      setFeedback({
-        type: "success",
-        message:
-          result.message ??
-          "Scorecard structure passed server-side validation.",
-      });
+      toast.success(
+        result.message ?? "Scorecard structure passed server-side validation.",
+      );
     } finally {
       setValidationPending(false);
     }
+  }
+
+  async function removeScorecard() {
+    const accepted = window.confirm(
+      "Delete this draft scorecard and its structure? This is only allowed before any monthly plan or actual data is recorded.",
+    );
+
+    if (!accepted) {
+      return;
+    }
+
+    const result = await deleteScorecardAction(data.id);
+
+    if (!result.success) {
+      handleError(result.message);
+      return;
+    }
+
+    router.push("/scorecards");
+    router.refresh();
   }
 
   return (
     <div className="min-h-full bg-slate-50/70">
       <div className="mx-auto w-full max-w-375 space-y-6 p-4 sm:p-6 lg:p-8">
         {/* Header */}
-        <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+        <section className="overflow-hidden rounded-3xl border border-slate-200 bg-(--background) shadow-sm">
           <div className="bg-linear-to-br from-slate-950 via-slate-900 to-slate-800 px-5 py-7 text-white sm:px-7">
             <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
               <div>
                 <div className="mb-3 flex flex-wrap items-center gap-2">
                   <Badge
                     variant="secondary"
-                    className="border-white/10 bg-white/10 text-white">
+                    className="border-white/10 bg-(--background)/10 text-white">
                     Fiscal Year {data.year}/{data.year + 1}
                   </Badge>
 
@@ -914,8 +980,8 @@ export function ScorecardEditor({ data, canEdit }: ScorecardEditorProps) {
                 </p>
               </div>
 
-              <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-3">
-                <div className="rounded-xl bg-white/10 p-2.5">
+              <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-(--background)/5 p-3">
+                <div className="rounded-xl bg-(--background)/10 p-2.5">
                   <Scale className="h-5 w-5" />
                 </div>
 
@@ -931,7 +997,7 @@ export function ScorecardEditor({ data, canEdit }: ScorecardEditorProps) {
             </div>
           </div>
 
-          <div className="grid gap-4 border-t border-slate-200 bg-white p-4 sm:grid-cols-2 lg:grid-cols-4 lg:p-5">
+          <div className="grid gap-4 border-t border-slate-200 bg-(--background) p-4 sm:grid-cols-2 lg:grid-cols-4 lg:p-5">
             <div className="rounded-2xl border border-slate-200 p-4">
               <div className="flex items-center gap-3">
                 <div className="rounded-xl bg-slate-100 p-2.5">
@@ -1028,37 +1094,8 @@ export function ScorecardEditor({ data, canEdit }: ScorecardEditorProps) {
           </div>
         </section>
 
-        {/* Feedback */}
-        {feedback && (
-          <div
-            className={[
-              "flex items-start justify-between gap-4 rounded-2xl border px-4 py-3 text-sm",
-              feedback.type === "success"
-                ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                : "border-red-200 bg-red-50 text-red-800",
-            ].join(" ")}>
-            <div className="flex items-start gap-2">
-              {feedback.type === "success" ? (
-                <Check className="mt-0.5 h-4 w-4 shrink-0" />
-              ) : (
-                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-              )}
-
-              <span>{feedback.message}</span>
-            </div>
-
-            <button
-              type="button"
-              className="shrink-0 opacity-70 transition hover:opacity-100"
-              onClick={() => setFeedback(null)}
-              aria-label="Dismiss message">
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        )}
-
         {/* Main editor */}
-        <section className="rounded-3xl border border-slate-200 bg-white shadow-sm">
+        <section className="rounded-3xl border border-slate-200 bg-(--background) shadow-sm">
           <div className="flex flex-col gap-4 border-b border-slate-200 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
             <div>
               <h2 className="text-lg font-bold text-slate-900">
@@ -1087,48 +1124,50 @@ export function ScorecardEditor({ data, canEdit }: ScorecardEditorProps) {
           </div>
 
           <div className="p-4 sm:p-6">
+            {target?.type === "perspective" && target.mode === "create" && (
+              <PerspectiveForm
+                scorecardId={data.id}
+                onClose={closeEditor}
+                onSaved={() => handleSaved("Perspective created successfully.")}
+                onError={handleError}
+              />
+            )}
+
             {data.perspectives.length === 0 ? (
-              <div className="flex flex-col items-center justify-center rounded-3xl border border-dashed border-slate-300 px-6 py-16 text-center">
-                <div className="rounded-2xl bg-slate-100 p-4">
-                  <Layers3 className="h-8 w-8 text-slate-500" />
+              target?.type === "perspective" &&
+              target.mode === "create" ? null : (
+                <div className="flex flex-col items-center justify-center rounded-3xl border border-dashed border-slate-300 px-6 py-16 text-center">
+                  <div className="rounded-2xl bg-slate-100 p-4">
+                    <Layers3 className="h-8 w-8 text-slate-500" />
+                  </div>
+
+                  <h3 className="mt-4 text-lg font-semibold text-slate-900">
+                    No perspectives yet
+                  </h3>
+
+                  <p className="mt-2 max-w-md text-sm leading-6 text-slate-500">
+                    Start the scorecard by creating its first strategic
+                    perspective.
+                  </p>
+
+                  {canEdit && (
+                    <Button
+                      type="button"
+                      className="mt-5"
+                      onClick={() =>
+                        setTarget({
+                          type: "perspective",
+                          mode: "create",
+                        })
+                      }>
+                      <CirclePlus className="mr-2 h-4 w-4" />
+                      Create first perspective
+                    </Button>
+                  )}
                 </div>
-
-                <h3 className="mt-4 text-lg font-semibold text-slate-900">
-                  No perspectives yet
-                </h3>
-
-                <p className="mt-2 max-w-md text-sm leading-6 text-slate-500">
-                  Start the scorecard by creating its first strategic
-                  perspective.
-                </p>
-
-                {canEdit && (
-                  <Button
-                    className="mt-5"
-                    onClick={() =>
-                      setTarget({
-                        type: "perspective",
-                        mode: "create",
-                      })
-                    }>
-                    <CirclePlus className="mr-2 h-4 w-4" />
-                    Create first perspective
-                  </Button>
-                )}
-              </div>
+              )
             ) : (
               <div className="space-y-4">
-                {target?.type === "perspective" && target.mode === "create" && (
-                  <PerspectiveForm
-                    scorecardId={data.id}
-                    onClose={closeEditor}
-                    onSaved={() =>
-                      handleSaved("Perspective created successfully.")
-                    }
-                    onError={handleError}
-                  />
-                )}
-
                 {data.perspectives.map((perspective, perspectiveIndex) => {
                   const perspectiveExpanded = expandedPerspectives.has(
                     perspective.id,
@@ -1229,7 +1268,7 @@ export function ScorecardEditor({ data, canEdit }: ScorecardEditorProps) {
 
                       {/* Objectives */}
                       {perspectiveExpanded && (
-                        <div className="border-t border-slate-200 bg-white p-4 sm:p-5">
+                        <div className="border-t border-slate-200 bg-(--background) p-4 sm:p-5">
                           <div className="mb-4 flex items-center justify-between gap-3">
                             <div className="flex items-center gap-2">
                               <ListChecks className="h-4 w-4 text-slate-500" />
@@ -1427,6 +1466,7 @@ export function ScorecardEditor({ data, canEdit }: ScorecardEditorProps) {
                                               <ActivityForm
                                                 scorecardId={data.id}
                                                 objectiveId={objective.id}
+                                                departments={departments}
                                                 onClose={closeEditor}
                                                 onSaved={() =>
                                                   handleSaved(
@@ -1438,7 +1478,7 @@ export function ScorecardEditor({ data, canEdit }: ScorecardEditorProps) {
                                             )}
 
                                           {objective.activities.length === 0 ? (
-                                            <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-5 py-8 text-center">
+                                            <div className="rounded-2xl border border-dashed border-slate-300 bg-(--background) px-5 py-8 text-center">
                                               <Activity className="mx-auto h-6 w-6 text-slate-400" />
 
                                               <p className="mt-2 text-sm font-medium text-slate-700">
@@ -1463,7 +1503,7 @@ export function ScorecardEditor({ data, canEdit }: ScorecardEditorProps) {
                                                   (activity, activityIndex) => (
                                                     <div
                                                       key={activity.id}
-                                                      className="rounded-2xl border border-slate-200 bg-white p-4">
+                                                      className="rounded-2xl border border-slate-200 bg-(--background) p-4">
                                                       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                                                         <div className="flex min-w-0 items-start gap-3">
                                                           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-xs font-bold text-slate-500">
@@ -1518,6 +1558,20 @@ export function ScorecardEditor({ data, canEdit }: ScorecardEditorProps) {
                                                                 }
                                                               </p>
                                                             )}
+
+                                                            <div className="mt-2 flex flex-wrap gap-1.5">
+                                                              {activity.responsibleUnits.map(
+                                                                (unit) => (
+                                                                  <Badge
+                                                                    key={
+                                                                      unit.id
+                                                                    }
+                                                                    variant="secondary">
+                                                                    {unit.name}
+                                                                  </Badge>
+                                                                ),
+                                                              )}
+                                                            </div>
                                                           </div>
                                                         </div>
 
@@ -1570,6 +1624,9 @@ export function ScorecardEditor({ data, canEdit }: ScorecardEditorProps) {
                                                             objectiveId={
                                                               objective.id
                                                             }
+                                                            departments={
+                                                              departments
+                                                            }
                                                             activity={activity}
                                                             onClose={
                                                               closeEditor
@@ -1608,7 +1665,7 @@ export function ScorecardEditor({ data, canEdit }: ScorecardEditorProps) {
         </section>
 
         {/* Footer guidance */}
-        <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+        <section className="rounded-3xl border border-slate-200 bg-(--background) p-5 shadow-sm sm:p-6">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <div className="flex items-center gap-2">
@@ -1671,6 +1728,15 @@ export function ScorecardEditor({ data, canEdit }: ScorecardEditorProps) {
                   </>
                 )}
               </Button>
+              {canEdit ? (
+                <Button
+                  type="button"
+                  variant="destructive"
+                  onClick={removeScorecard}>
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Delete draft
+                </Button>
+              ) : null}
             </div>
           </div>
         </section>

@@ -1,12 +1,6 @@
-import { redirect } from "next/navigation";
-import { auth } from "@/auth";
-
 import { prisma } from "@/lib/prisma";
-import { UserRole } from "@/generated/prisma";
-import {
-  getScorecards,
-  type ScorecardActor,
-} from "@/lib/services/scorecard.service";
+import { getScorecards } from "@/lib/services/scorecard.service";
+import { getScorecardActorOrRedirect } from "@/lib/scorecard-actor";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -16,47 +10,17 @@ function formatFiscalYear(year: number): string {
   return `FY${year}/${year + 1}`;
 }
 
-function getActor(user: {
-  id: string;
-  role: UserRole;
-  departmentId: string;
-}): ScorecardActor {
-  return {
-    userId: user.id,
-    role: user.role,
-    departmentId: user.departmentId,
-  };
-}
-
 export default async function ScorecardsPage() {
-  const session = await auth();
-
-  if (!session?.user?.id) {
-    redirect("/login");
-  }
-
-  const user = await prisma.user.findUnique({
-    where: {
-      id: session.user.id,
-    },
-    select: {
-      id: true,
-      role: true,
-      departmentId: true,
-    },
-  });
-
-  if (!user) {
-    redirect("/login");
-  }
-
-  const actor = getActor(user);
+  const actor = await getScorecardActorOrRedirect();
 
   const [scorecards, departments] = await Promise.all([
     getScorecards(actor),
 
-    actor.role === UserRole.ADMIN
+    actor.canAdministerAllDepartments
       ? prisma.department.findMany({
+          where: {
+            isActive: true,
+          },
           select: {
             id: true,
             name: true,
@@ -65,7 +29,16 @@ export default async function ScorecardsPage() {
             name: "asc",
           },
         })
-      : Promise.resolve([]),
+      : prisma.department.findMany({
+          where: {
+            id: actor.departmentId,
+            isActive: true,
+          },
+          select: {
+            id: true,
+            name: true,
+          },
+        }),
   ]);
 
   const totalPerspectives = scorecards.reduce(
@@ -126,7 +99,7 @@ export default async function ScorecardsPage() {
             </p>
           </div>
 
-          {actor.role === UserRole.ADMIN && (
+          {actor.role === "ADMIN" && (
             <ScorecardCreateDialog departments={departments} />
           )}
         </div>
@@ -222,12 +195,12 @@ export default async function ScorecardsPage() {
               <h3 className="text-lg font-semibold">No scorecards yet</h3>
 
               <p className="mt-2 max-w-md text-sm text-muted-foreground">
-                {actor.role === UserRole.ADMIN
+                {actor.role === "ADMIN"
                   ? "Create the first departmental scorecard to begin defining perspectives, objectives and activities."
                   : "Your department does not have a scorecard yet."}
               </p>
 
-              {actor.role === UserRole.ADMIN && (
+              {actor.role === "ADMIN" && (
                 <div className="mt-5">
                   <ScorecardCreateDialog departments={departments} />
                 </div>

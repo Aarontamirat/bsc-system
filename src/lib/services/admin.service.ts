@@ -2,14 +2,14 @@ import "server-only";
 
 import bcrypt from "bcrypt";
 
-import { prisma } from "@/lib/prisma";
 import { UserRole } from "@/generated/prisma/client";
-import { ScorecardServiceError } from "@/lib/services/scorecard.service";
+import { prisma } from "@/lib/prisma";
+import {
+  ScorecardServiceError,
+  type ScorecardActor,
+} from "@/lib/services/scorecard.service";
 
-export type DepartmentInput = {
-  name: string;
-  description?: string;
-};
+export type DepartmentInput = { name: string; description?: string };
 
 export type UserInput = {
   username: string;
@@ -27,6 +27,43 @@ function normalizeUsername(value: string): string {
   return value.trim().toLowerCase();
 }
 
+function assertAdministrator(actor: ScorecardActor): void {
+  if (actor.role !== UserRole.ADMIN) {
+    throw new ScorecardServiceError(
+      "Administrator privileges are required for this operation.",
+      "FORBIDDEN",
+    );
+  }
+}
+
+function assertDepartmentScope(
+  actor: ScorecardActor,
+  departmentId: string,
+): void {
+  assertAdministrator(actor);
+
+  if (
+    !actor.canAdministerAllDepartments &&
+    actor.departmentId !== departmentId
+  ) {
+    throw new ScorecardServiceError(
+      "Department administrators can manage only their own department.",
+      "FORBIDDEN",
+    );
+  }
+}
+
+function assertGlobalAdministration(actor: ScorecardActor): void {
+  assertAdministrator(actor);
+
+  if (!actor.canAdministerAllDepartments) {
+    throw new ScorecardServiceError(
+      "Only Administration department administrators can create departments.",
+      "FORBIDDEN",
+    );
+  }
+}
+
 function assertPassword(password: string): void {
   if (password.length < 12) {
     throw new ScorecardServiceError(
@@ -36,11 +73,30 @@ function assertPassword(password: string): void {
   }
 }
 
-export async function listDepartments() {
+async function getActiveDepartment(departmentId: string) {
+  const department = await prisma.department.findFirst({
+    where: { id: departmentId, isActive: true },
+    select: { id: true },
+  });
+
+  if (!department) {
+    throw new ScorecardServiceError(
+      "Select an active department.",
+      "VALIDATION_ERROR",
+    );
+  }
+
+  return department;
+}
+
+export async function listDepartments(actor: ScorecardActor) {
+  assertAdministrator(actor);
+
   return prisma.department.findMany({
-    orderBy: {
-      name: "asc",
-    },
+    where: actor.canAdministerAllDepartments
+      ? undefined
+      : { id: actor.departmentId },
+    orderBy: { name: "asc" },
     include: {
       _count: {
         select: {
@@ -53,7 +109,11 @@ export async function listDepartments() {
   });
 }
 
-export async function createDepartment(input: DepartmentInput) {
+export async function createDepartment(
+  actor: ScorecardActor,
+  input: DepartmentInput,
+) {
+  assertGlobalAdministration(actor);
   const name = normalizeName(input.name);
 
   if (!name) {
@@ -73,9 +133,20 @@ export async function createDepartment(input: DepartmentInput) {
 }
 
 export async function updateDepartment(
+  actor: ScorecardActor,
   departmentId: string,
   input: DepartmentInput & { isActive: boolean },
 ) {
+  const department = await prisma.department.findUnique({
+    where: { id: departmentId },
+    select: { id: true, name: true },
+  });
+
+  if (!department) {
+    throw new ScorecardServiceError("Department not found.", "NOT_FOUND");
+  }
+
+  assertDepartmentScope(actor, department.id);
   const name = normalizeName(input.name);
 
   if (!name) {
@@ -85,10 +156,18 @@ export async function updateDepartment(
     );
   }
 
+  if (
+    department.name.trim().toLocaleLowerCase() === "administration" &&
+    (name.toLocaleLowerCase() !== "administration" || !input.isActive)
+  ) {
+    throw new ScorecardServiceError(
+      "The Administration department must remain active and keep its name.",
+      "CONFLICT",
+    );
+  }
+
   return prisma.department.update({
-    where: {
-      id: departmentId,
-    },
+    where: { id: departmentId },
     data: {
       name,
       description: input.description?.trim() || null,
@@ -97,11 +176,12 @@ export async function updateDepartment(
   });
 }
 
-export async function deleteDepartment(departmentId: string) {
+export async function deleteDepartment(
+  actor: ScorecardActor,
+  departmentId: string,
+) {
   const department = await prisma.department.findUnique({
-    where: {
-      id: departmentId,
-    },
+    where: { id: departmentId },
     include: {
       _count: {
         select: {
@@ -117,6 +197,15 @@ export async function deleteDepartment(departmentId: string) {
     throw new ScorecardServiceError("Department not found.", "NOT_FOUND");
   }
 
+  assertDepartmentScope(actor, department.id);
+
+  if (department.name.trim().toLocaleLowerCase() === "administration") {
+    throw new ScorecardServiceError(
+      "The Administration department cannot be deleted.",
+      "CONFLICT",
+    );
+  }
+
   if (
     department._count.users > 0 ||
     department._count.scorecards > 0 ||
@@ -128,18 +217,34 @@ export async function deleteDepartment(departmentId: string) {
     );
   }
 
-  await prisma.department.delete({
-    where: {
-      id: departmentId,
-    },
-  });
+  await prisma.department.delete({ where: { id: departmentId } });
 }
 
-export async function listUsers() {
+export async function listUsers(actor: ScorecardActor) {
+  // Non-admins only get their own profile
+  if (actor.role !== UserRole.ADMIN) {
+    return prisma.user.findMany({
+      where: { id: actor.userId },
+      orderBy: { username: "asc" },
+      select: {
+        id: true,
+        username: true,
+        role: true,
+        departmentId: true,
+        isActive: true,
+        createdAt: true,
+        updatedAt: true,
+        department: { select: { name: true } },
+      },
+    });
+  }
+
+  // Admins get department-scoped or global user list
   return prisma.user.findMany({
-    orderBy: {
-      username: "asc",
-    },
+    where: actor.canAdministerAllDepartments
+      ? undefined
+      : { departmentId: actor.departmentId },
+    orderBy: { username: "asc" },
     select: {
       id: true,
       username: true,
@@ -148,79 +253,64 @@ export async function listUsers() {
       isActive: true,
       createdAt: true,
       updatedAt: true,
-      department: {
-        select: {
-          name: true,
-        },
-      },
+      department: { select: { name: true } },
     },
   });
 }
 
 async function assertCanChangeAdminState(
-  userId: string,
-  nextRole: UserRole,
-  nextActive: boolean,
+  existing: {
+    id: string;
+    departmentId: string;
+    role: UserRole;
+    isActive: boolean;
+  },
+  input: UserInput,
 ): Promise<void> {
-  const existing = await prisma.user.findUnique({
-    where: {
-      id: userId,
-    },
-    select: {
-      role: true,
-      isActive: true,
-    },
-  });
+  const remainsActiveAdminInDepartment =
+    input.departmentId === existing.departmentId &&
+    input.role === UserRole.ADMIN &&
+    input.isActive;
 
-  if (!existing || existing.role !== UserRole.ADMIN || !existing.isActive) {
+  if (
+    existing.role !== UserRole.ADMIN ||
+    !existing.isActive ||
+    remainsActiveAdminInDepartment
+  ) {
     return;
   }
 
-  if (nextRole === UserRole.ADMIN && nextActive) {
-    return;
-  }
-
-  const activeAdminCount = await prisma.user.count({
+  const otherActiveAdminCount = await prisma.user.count({
     where: {
+      departmentId: existing.departmentId,
       role: UserRole.ADMIN,
       isActive: true,
-      NOT: {
-        id: userId,
-      },
+      NOT: { id: existing.id },
     },
   });
 
-  if (activeAdminCount === 0) {
+  if (otherActiveAdminCount === 0) {
     throw new ScorecardServiceError(
-      "At least one active administrator must remain.",
+      "At least one active administrator must remain in this department.",
       "CONFLICT",
     );
   }
 }
 
-export async function createUser(input: UserInput) {
+export async function createUser(actor: ScorecardActor, input: UserInput) {
+  assertDepartmentScope(actor, input.departmentId);
   const username = normalizeUsername(input.username);
   const password = input.password ?? "";
 
   if (!username) {
-    throw new ScorecardServiceError("Username is required.", "VALIDATION_ERROR");
+    throw new ScorecardServiceError(
+      "Username is required.",
+      "VALIDATION_ERROR",
+    );
   }
 
   assertPassword(password);
-
-  const department = await prisma.department.findUnique({
-    where: {
-      id: input.departmentId,
-    },
-    select: {
-      id: true,
-    },
-  });
-
-  if (!department) {
-    throw new ScorecardServiceError("Department not found.", "NOT_FOUND");
-  }
-
+  await getActiveDepartment(input.departmentId);
   const passwordHash = await bcrypt.hash(password, 12);
 
   return prisma.user.create({
@@ -231,20 +321,61 @@ export async function createUser(input: UserInput) {
       departmentId: input.departmentId,
       isActive: input.isActive,
     },
-    select: {
-      id: true,
-    },
+    select: { id: true },
   });
 }
 
-export async function updateUser(userId: string, input: UserInput) {
-  const username = normalizeUsername(input.username);
+export async function updateUser(
+  actor: ScorecardActor,
+  userId: string,
+  input: UserInput,
+) {
+  const existing = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      departmentId: true,
+      role: true,
+      isActive: true,
+    },
+  });
 
-  if (!username) {
-    throw new ScorecardServiceError("Username is required.", "VALIDATION_ERROR");
+  if (!existing) {
+    throw new ScorecardServiceError("User not found.", "NOT_FOUND");
   }
 
-  await assertCanChangeAdminState(userId, input.role, input.isActive);
+  const isAdmin = actor.role === UserRole.ADMIN;
+
+  if (isAdmin) {
+    // Admin checks
+    assertDepartmentScope(actor, existing.departmentId);
+    assertDepartmentScope(actor, input.departmentId);
+    await getActiveDepartment(input.departmentId);
+    await assertCanChangeAdminState(existing, input);
+  } else {
+    // Non-admin check: only update own account
+    if (actor.userId !== userId) {
+      throw new ScorecardServiceError(
+        "You are only authorized to update your own account details.",
+        "FORBIDDEN",
+      );
+    }
+  }
+
+  const username = normalizeUsername(input.username);
+  if (!username) {
+    throw new ScorecardServiceError(
+      "Username is required.",
+      "VALIDATION_ERROR",
+    );
+  }
+
+  // Prevent non-admins from changing role, departmentId, or active state even if form payloads are tampered
+  const finalRole = isAdmin ? input.role : existing.role;
+  const finalDepartmentId = isAdmin
+    ? input.departmentId
+    : existing.departmentId;
+  const finalIsActive = isAdmin ? input.isActive : existing.isActive;
 
   const data: {
     username: string;
@@ -254,9 +385,9 @@ export async function updateUser(userId: string, input: UserInput) {
     passwordHash?: string;
   } = {
     username,
-    role: input.role,
-    departmentId: input.departmentId,
-    isActive: input.isActive,
+    role: finalRole,
+    departmentId: finalDepartmentId,
+    isActive: finalIsActive,
   };
 
   if (input.password) {
@@ -265,12 +396,8 @@ export async function updateUser(userId: string, input: UserInput) {
   }
 
   return prisma.user.update({
-    where: {
-      id: userId,
-    },
+    where: { id: userId },
     data,
-    select: {
-      id: true,
-    },
+    select: { id: true },
   });
 }

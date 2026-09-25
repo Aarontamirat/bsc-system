@@ -37,7 +37,19 @@ export function LoginForm() {
         return;
       }
 
-      router.push(result.url || callbackUrl);
+      // Extracting relative path to preserve browser's current host/IP
+      let targetPath = callbackUrl;
+
+      if (result.url) {
+        try {
+          const parsed = new URL(result.url);
+          targetPath = parsed.pathname + parsed.search + parsed.hash;
+        } catch {
+          targetPath = result.url;
+        }
+      }
+
+      router.push(targetPath);
       router.refresh();
     } catch {
       setError("Unable to complete the sign-in request. Please try again.");
@@ -54,7 +66,7 @@ export function LoginForm() {
           <div className="relative z-10 flex w-full flex-col justify-between p-12 xl:p-16">
             <div>
               <div className="mb-10 flex items-center gap-3">
-                <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/5">
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-(--background)/5">
                   <span className="text-lg font-bold">B</span>
                 </div>
 
@@ -106,7 +118,7 @@ export function LoginForm() {
               </div>
             </div>
 
-            <div className="rounded-3xl border border-slate-200 bg-white p-7 shadow-xl shadow-slate-200/50 sm:p-9">
+            <div className="rounded-3xl border border-slate-200 bg-(--background) p-7 shadow-xl shadow-slate-200/50 sm:p-9">
               <div className="mb-8">
                 <p className="text-sm font-medium text-sky-600">
                   Secure sign in
@@ -136,7 +148,7 @@ export function LoginForm() {
                       required
                       value={username}
                       onChange={(event) => setUsername(event.target.value)}
-                      className="h-12 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-4 text-sm outline-none transition focus:border-sky-500 focus:bg-white focus:ring-4 focus:ring-sky-500/10"
+                      className="h-12 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-4 text-sm outline-none transition focus:border-sky-500 focus:bg-(--background) focus:ring-4 focus:ring-sky-500/10"
                       placeholder="Username"
                     />
                   </div>
@@ -158,7 +170,7 @@ export function LoginForm() {
                       required
                       value={password}
                       onChange={(event) => setPassword(event.target.value)}
-                      className="h-12 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-11 text-sm outline-none transition focus:border-sky-500 focus:bg-white focus:ring-4 focus:ring-sky-500/10"
+                      className="h-12 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-11 text-sm outline-none transition focus:border-sky-500 focus:bg-(--background) focus:ring-4 focus:ring-sky-500/10"
                       placeholder="Password"
                     />
                     <button

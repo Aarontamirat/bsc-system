@@ -2,7 +2,7 @@ import "server-only";
 
 import { redirect } from "next/navigation";
 
-import { getCurrentUser } from "@/lib/auth-guards";
+import { canAdministerAllDepartments, getCurrentUser } from "@/lib/auth-guards";
 import {
   ScorecardServiceError,
   type ScorecardActor,
@@ -19,6 +19,7 @@ export async function getScorecardActor(): Promise<ScorecardActor> {
     userId: user.id,
     role: user.role,
     departmentId: user.departmentId,
+    canAdministerAllDepartments: canAdministerAllDepartments(user),
   };
 }
 
@@ -33,5 +34,6 @@ export async function getScorecardActorOrRedirect(): Promise<ScorecardActor> {
     userId: user.id,
     role: user.role,
     departmentId: user.departmentId,
+    canAdministerAllDepartments: canAdministerAllDepartments(user),
   };
 }

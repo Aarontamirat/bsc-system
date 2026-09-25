@@ -3,7 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
-import { requireAdmin } from "@/lib/auth-guards";
+import {
+  getScorecardActor,
+  getScorecardActorOrRedirect,
+} from "@/lib/scorecard-actor";
 import {
   createDepartment,
   createUser,
@@ -27,7 +30,11 @@ function roleValue(raw: string): UserRole {
   return raw === UserRole.ADMIN ? UserRole.ADMIN : UserRole.USER;
 }
 
-function redirectWithMessage(path: string, message: string, ok: boolean): never {
+function redirectWithMessage(
+  path: string,
+  message: string,
+  ok: boolean,
+): never {
   const params = new URLSearchParams({
     [ok ? "message" : "error"]: message,
   });
@@ -47,54 +54,63 @@ function errorMessage(error: unknown): string {
   return "An unexpected error occurred.";
 }
 
-export async function createDepartmentAction(formData: FormData) {
-  await requireAdmin();
+async function getAdminActor() {
+  const actor = await getScorecardActor();
 
+  if (actor.role !== UserRole.ADMIN) {
+    throw new ScorecardServiceError(
+      "Administrator privileges are required for this operation.",
+      "FORBIDDEN",
+    );
+  }
+
+  return actor;
+}
+
+export async function createDepartmentAction(formData: FormData) {
   try {
-    await createDepartment({
+    const actor = await getAdminActor();
+    await createDepartment(actor, {
       name: value(formData, "name"),
       description: value(formData, "description"),
     });
     revalidatePath("/admin/departments");
-    redirectWithMessage("/admin/departments", "Department created.", true);
   } catch (error) {
     redirectWithMessage("/admin/departments", errorMessage(error), false);
   }
+  redirectWithMessage("/admin/departments", "Department created.", true);
 }
 
 export async function updateDepartmentAction(formData: FormData) {
-  await requireAdmin();
-
   try {
-    await updateDepartment(value(formData, "id"), {
+    const actor = await getAdminActor();
+    await updateDepartment(actor, value(formData, "id"), {
       name: value(formData, "name"),
       description: value(formData, "description"),
       isActive: boolValue(formData, "isActive"),
     });
     revalidatePath("/admin/departments");
-    redirectWithMessage("/admin/departments", "Department updated.", true);
   } catch (error) {
     redirectWithMessage("/admin/departments", errorMessage(error), false);
   }
+  redirectWithMessage("/admin/departments", "Department updated.", true);
 }
 
 export async function deleteDepartmentAction(formData: FormData) {
-  await requireAdmin();
-
   try {
-    await deleteDepartment(value(formData, "id"));
+    const actor = await getAdminActor();
+    await deleteDepartment(actor, value(formData, "id"));
     revalidatePath("/admin/departments");
-    redirectWithMessage("/admin/departments", "Department deleted.", true);
   } catch (error) {
     redirectWithMessage("/admin/departments", errorMessage(error), false);
   }
+  redirectWithMessage("/admin/departments", "Department deleted.", true);
 }
 
 export async function createUserAction(formData: FormData) {
-  await requireAdmin();
-
   try {
-    await createUser({
+    const actor = await getAdminActor();
+    await createUser(actor, {
       username: value(formData, "username"),
       password: value(formData, "password"),
       role: roleValue(value(formData, "role")),
@@ -102,17 +118,17 @@ export async function createUserAction(formData: FormData) {
       isActive: boolValue(formData, "isActive"),
     });
     revalidatePath("/admin/users");
-    redirectWithMessage("/admin/users", "User created.", true);
   } catch (error) {
     redirectWithMessage("/admin/users", errorMessage(error), false);
   }
+  redirectWithMessage("/admin/users", "User created.", true);
 }
 
 export async function updateUserAction(formData: FormData) {
-  await requireAdmin();
-
   try {
-    await updateUser(value(formData, "id"), {
+    const actor = await getScorecardActorOrRedirect();
+    const targetUserId = value(formData, "id");
+    await updateUser(actor, targetUserId, {
       username: value(formData, "username"),
       password: value(formData, "password") || undefined,
       role: roleValue(value(formData, "role")),
@@ -120,8 +136,8 @@ export async function updateUserAction(formData: FormData) {
       isActive: boolValue(formData, "isActive"),
     });
     revalidatePath("/admin/users");
-    redirectWithMessage("/admin/users", "User updated.", true);
   } catch (error) {
     redirectWithMessage("/admin/users", errorMessage(error), false);
   }
+  redirectWithMessage("/admin/users", "User updated.", true);
 }

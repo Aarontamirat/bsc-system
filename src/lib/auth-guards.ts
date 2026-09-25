@@ -9,6 +9,7 @@ export type CurrentUser = {
   username: string;
   role: UserRole;
   departmentId: string;
+  departmentName: string;
   isActive: boolean;
 };
 
@@ -42,6 +43,11 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
       role: true,
       departmentId: true,
       isActive: true,
+      department: {
+        select: {
+          name: true,
+        },
+      },
     },
   });
 
@@ -49,7 +55,19 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
     return null;
   }
 
-  return user;
+  return {
+    ...user,
+    departmentName: user.department.name,
+  };
+}
+
+export function canAdministerAllDepartments(
+  user: Pick<CurrentUser, "role" | "departmentName">,
+): boolean {
+  return (
+    user.role === UserRole.ADMIN &&
+    user.departmentName.trim().toLocaleLowerCase() === "administration"
+  );
 }
 
 export async function requireUser(): Promise<CurrentUser> {

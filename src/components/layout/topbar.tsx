@@ -56,7 +56,7 @@ export function Topbar({ username, role }: TopbarProps) {
   const page = getPageTitle(pathname);
 
   return (
-    <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 backdrop-blur-xl">
+    <header className="sticky top-0 z-30 border-b border-slate-200 bg-(--background)/90 backdrop-blur-xl">
       <div className="flex min-h-18 items-center gap-3 px-4 sm:px-6 lg:px-8">
         <MobileNav role={role} />
 

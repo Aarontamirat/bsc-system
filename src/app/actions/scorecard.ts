@@ -1,8 +1,6 @@
 "use server";
 
-import { auth } from "@/auth";
 import { revalidatePath } from "next/cache";
-import { UserRole } from "@/generated/prisma";
 
 import {
   createScorecard,
@@ -13,6 +11,7 @@ import {
   validateScorecardWeights,
   ScorecardServiceError,
 } from "@/lib/services/scorecard.service";
+import { getScorecardActor } from "@/lib/scorecard-actor";
 
 type ActionResult<T> =
   | {
@@ -26,42 +25,7 @@ type ActionResult<T> =
     };
 
 async function getActor() {
-  const session = await auth();
-
-  if (!session?.user?.id) {
-    throw new ScorecardServiceError("You must be signed in.", "UNAUTHORIZED");
-  }
-
-  /*
-   * Read the authoritative role/department from the database
-   * rather than trusting client-provided session data.
-   */
-  const { prisma } = await import("@/lib/prisma");
-
-  const user = await prisma.user.findUnique({
-    where: {
-      id: session.user.id,
-    },
-    select: {
-      id: true,
-      role: true,
-      departmentId: true,
-    },
-  });
-
-  if (!user) {
-    throw new ScorecardServiceError("User account not found.", "UNAUTHORIZED");
-  }
-
-  if (user.role !== UserRole.ADMIN && user.role !== UserRole.USER) {
-    throw new ScorecardServiceError("Invalid user role.", "UNAUTHORIZED");
-  }
-
-  return {
-    userId: user.id,
-    role: user.role,
-    departmentId: user.departmentId,
-  };
+  return getScorecardActor();
 }
 
 function getErrorMessage(error: unknown): string {

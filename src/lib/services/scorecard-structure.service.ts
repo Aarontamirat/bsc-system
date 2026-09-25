@@ -15,7 +15,10 @@ function assertValidName(value: string, field: string) {
   const normalized = normalizeName(value);
 
   if (!normalized) {
-    throw new ScorecardServiceError(`${field} is required.`, "VALIDATION_ERROR");
+    throw new ScorecardServiceError(
+      `${field} is required.`,
+      "VALIDATION_ERROR",
+    );
   }
 
   if (normalized.length > 200) {
@@ -55,6 +58,116 @@ function assertAdmin(actor: ScorecardActor) {
   }
 }
 
+/* ==========================================================================
+   Serialization Helpers
+   ========================================================================== */
+
+function serializeActivity<
+  T extends {
+    weight?: unknown;
+    annualTarget?: unknown;
+    baseline?: unknown;
+  },
+>(activity: T) {
+  return {
+    ...activity,
+    ...(activity.weight !== undefined
+      ? { weight: Number(activity.weight) }
+      : {}),
+    ...(activity.annualTarget !== undefined
+      ? { annualTarget: Number(activity.annualTarget) }
+      : {}),
+    ...(activity.baseline !== undefined
+      ? { baseline: Number(activity.baseline) }
+      : {}),
+  };
+}
+
+function serializeObjective<
+  T extends {
+    weight?: unknown;
+    activities?: Array<any>;
+  },
+>(objective: T) {
+  return {
+    ...objective,
+    ...(objective.weight !== undefined
+      ? { weight: Number(objective.weight) }
+      : {}),
+    ...(objective.activities
+      ? { activities: objective.activities.map(serializeActivity) }
+      : {}),
+  };
+}
+
+function serializePerspective<
+  T extends {
+    weight?: unknown;
+    objectives?: Array<any>;
+  },
+>(perspective: T) {
+  return {
+    ...perspective,
+    ...(perspective.weight !== undefined
+      ? { weight: Number(perspective.weight) }
+      : {}),
+    ...(perspective.objectives
+      ? { objectives: perspective.objectives.map(serializeObjective) }
+      : {}),
+  };
+}
+
+export function serializeScorecardStructure<
+  T extends {
+    perspectives?: Array<any>;
+  },
+>(scorecard: T) {
+  return {
+    ...scorecard,
+    ...(scorecard.perspectives
+      ? { perspectives: scorecard.perspectives.map(serializePerspective) }
+      : {}),
+  };
+}
+
+/* ==========================================================================
+   Internal Queries
+   ========================================================================== */
+
+async function getResponsibleDepartmentIds(
+  departmentIds: readonly string[],
+): Promise<string[]> {
+  const uniqueIds = [...new Set(departmentIds.filter(Boolean))];
+
+  if (uniqueIds.length === 0) {
+    throw new ScorecardServiceError(
+      "Assign at least one responsible unit to each activity.",
+      "VALIDATION_ERROR",
+    );
+  }
+
+  const departments = await prisma.department.findMany({
+    where: {
+      id: {
+        in: uniqueIds,
+      },
+      isActive: true,
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  if (departments.length !== uniqueIds.length) {
+    throw new ScorecardServiceError(
+      "Responsible units must be active departments.",
+      "VALIDATION_ERROR",
+    );
+  }
+
+  return uniqueIds;
+}
+
 async function getAuthorizedScorecard(
   actor: ScorecardActor,
   scorecardId: string,
@@ -80,7 +193,7 @@ async function getAuthorizedScorecard(
   }
 
   if (
-    actor.role !== UserRole.ADMIN &&
+    !actor.canAdministerAllDepartments &&
     (!actor.departmentId || actor.departmentId !== scorecard.departmentId)
   ) {
     throw new ScorecardServiceError(
@@ -102,7 +215,7 @@ export async function getScorecardStructure(
 ) {
   await getAuthorizedScorecard(actor, scorecardId);
 
-  return prisma.scorecard.findUnique({
+  const scorecard = await prisma.scorecard.findUnique({
     where: {
       id: scorecardId,
     },
@@ -114,7 +227,16 @@ export async function getScorecardStructure(
             include: {
               activities: {
                 include: {
-                  responsibleUnits: true,
+                  responsibleUnits: {
+                    include: {
+                      department: {
+                        select: {
+                          id: true,
+                          name: true,
+                        },
+                      },
+                    },
+                  },
                 },
               },
             },
@@ -123,6 +245,8 @@ export async function getScorecardStructure(
       },
     },
   });
+
+  return scorecard ? serializeScorecardStructure(scorecard) : null;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -164,13 +288,15 @@ export async function createPerspective(
 
   assertWeightTotal(newTotal);
 
-  return prisma.perspective.create({
+  const created = await prisma.perspective.create({
     data: {
       scorecardId: input.scorecardId,
       name,
       weight,
     },
   });
+
+  return serializePerspective(created);
 }
 
 export async function updatePerspective(
@@ -224,7 +350,7 @@ export async function updatePerspective(
 
   assertWeightTotal(siblingTotal + weight);
 
-  return prisma.perspective.update({
+  const updated = await prisma.perspective.update({
     where: {
       id: existingPerspective.id,
     },
@@ -233,6 +359,8 @@ export async function updatePerspective(
       weight,
     },
   });
+
+  return serializePerspective(updated);
 }
 
 export async function deletePerspective(
@@ -331,13 +459,15 @@ export async function createObjective(
 
   assertWeightTotal(currentTotal + weight);
 
-  return prisma.objective.create({
+  const created = await prisma.objective.create({
     data: {
       perspectiveId: input.perspectiveId,
       name,
       weight,
     },
   });
+
+  return serializeObjective(created);
 }
 
 export async function updateObjective(
@@ -399,7 +529,7 @@ export async function updateObjective(
 
   assertWeightTotal(siblingTotal + weight);
 
-  return prisma.objective.update({
+  const updated = await prisma.objective.update({
     where: {
       id: existingObjective.id,
     },
@@ -408,6 +538,8 @@ export async function updateObjective(
       weight,
     },
   });
+
+  return serializeObjective(updated);
 }
 
 export async function deleteObjective(
@@ -473,6 +605,7 @@ export async function createActivity(
     annualTarget: number;
     baseline?: number;
     remark?: string;
+    responsibleDepartmentIds: string[];
   },
 ) {
   assertAdmin(actor);
@@ -547,8 +680,11 @@ export async function createActivity(
   });
 
   const sortOrder = (lastActivity?.sortOrder ?? -1) + 1;
+  const responsibleDepartmentIds = await getResponsibleDepartmentIds(
+    input.responsibleDepartmentIds,
+  );
 
-  return prisma.activity.create({
+  const created = await prisma.activity.create({
     data: {
       objectiveId: input.objectiveId,
       name,
@@ -558,8 +694,15 @@ export async function createActivity(
       baseline,
       remark: input.remark?.trim() || null,
       sortOrder,
+      responsibleUnits: {
+        create: responsibleDepartmentIds.map((departmentId) => ({
+          departmentId,
+        })),
+      },
     },
   });
+
+  return serializeActivity(created);
 }
 
 export async function updateActivity(
@@ -572,6 +715,7 @@ export async function updateActivity(
     annualTarget: number;
     baseline?: number;
     remark?: string;
+    responsibleDepartmentIds: string[];
   },
 ) {
   assertAdmin(actor);
@@ -644,8 +788,11 @@ export async function updateActivity(
   );
 
   assertWeightTotal(siblingTotal + weight);
+  const responsibleDepartmentIds = await getResponsibleDepartmentIds(
+    input.responsibleDepartmentIds,
+  );
 
-  return prisma.activity.update({
+  const updated = await prisma.activity.update({
     where: {
       id: existingActivity.id,
     },
@@ -656,8 +803,16 @@ export async function updateActivity(
       annualTarget,
       baseline,
       remark: input.remark?.trim() || null,
+      responsibleUnits: {
+        deleteMany: {},
+        create: responsibleDepartmentIds.map((departmentId) => ({
+          departmentId,
+        })),
+      },
     },
   });
+
+  return serializeActivity(updated);
 }
 
 export async function deleteActivity(

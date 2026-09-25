@@ -72,7 +72,9 @@ export default async function DashboardPage() {
   const scorecard = await prisma.scorecard.findFirst({
     where: {
       year: fiscalYear,
-      ...(actor.role === "ADMIN" ? {} : { departmentId: actor.departmentId }),
+      ...(actor.canAdministerAllDepartments
+        ? {}
+        : { departmentId: actor.departmentId }),
     },
     orderBy: {
       updatedAt: "desc",
@@ -265,9 +267,11 @@ export default async function DashboardPage() {
               </div>
               <div>
                 <p className="text-sm font-semibold">
-                  {actor.role === "ADMIN"
+                  {actor.canAdministerAllDepartments
                     ? "System Administrator"
-                    : "Department User"}
+                    : actor.role === "ADMIN"
+                      ? "Department Administrator"
+                      : "Department User"}
                 </p>
                 <p className="text-xs text-slate-500">
                   Server actions re-check this role for every mutation.

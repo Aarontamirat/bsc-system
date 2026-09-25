@@ -7,6 +7,7 @@ export type ScorecardActor = {
   userId: string;
   role: UserRole;
   departmentId: string;
+  canAdministerAllDepartments: boolean;
 };
 
 export type CreateScorecardInput = {
@@ -70,7 +71,7 @@ function assertDepartmentAccess(
   actor: ScorecardActor,
   departmentId: string,
 ): void {
-  if (actor.role === UserRole.ADMIN) {
+  if (actor.canAdministerAllDepartments) {
     return;
   }
 
@@ -123,10 +124,74 @@ function assertWeightTotal(
   }
 }
 
+/* ==========================================================================
+   Serialization Helpers (Convert Decimal Instances to Standard JS Numbers)
+   ========================================================================== */
+
+function serializeActivity<
+  T extends {
+    weight: unknown;
+    annualTarget?: unknown;
+    baseline?: unknown;
+  },
+>(activity: T) {
+  return {
+    ...activity,
+    weight: Number(activity.weight),
+    ...(activity.annualTarget !== undefined
+      ? { annualTarget: Number(activity.annualTarget) }
+      : {}),
+    ...(activity.baseline !== undefined
+      ? { baseline: Number(activity.baseline) }
+      : {}),
+  };
+}
+
+function serializeObjective<
+  T extends {
+    weight: unknown;
+    activities?: Array<any>;
+  },
+>(objective: T) {
+  return {
+    ...objective,
+    weight: Number(objective.weight),
+    activities: objective.activities?.map(serializeActivity),
+  };
+}
+
+function serializePerspective<
+  T extends {
+    weight: unknown;
+    objectives?: Array<any>;
+  },
+>(perspective: T) {
+  return {
+    ...perspective,
+    weight: Number(perspective.weight),
+    objectives: perspective.objectives?.map(serializeObjective),
+  };
+}
+
+export function serializeScorecard<
+  T extends {
+    perspectives?: Array<any>;
+  },
+>(scorecard: T) {
+  return {
+    ...scorecard,
+    perspectives: scorecard.perspectives?.map(serializePerspective),
+  };
+}
+
+/* ==========================================================================
+   Service Actions
+   ========================================================================== */
+
 /**
  * Return all scorecards visible to the current user.
  *
- * Administrators:
+ * Administration administrators:
  *   - Can see every department.
  *
  * Department users:
@@ -137,17 +202,16 @@ export async function getScorecards(actor: ScorecardActor, year?: number) {
     assertValidYear(year);
   }
 
-  const where =
-    actor.role === UserRole.ADMIN
-      ? {
-          ...(year !== undefined ? { year } : {}),
-        }
-      : {
-          departmentId: actor.departmentId ?? "__NO_DEPARTMENT__",
-          ...(year !== undefined ? { year } : {}),
-        };
+  const where = actor.canAdministerAllDepartments
+    ? {
+        ...(year !== undefined ? { year } : {}),
+      }
+    : {
+        departmentId: actor.departmentId ?? "__NO_DEPARTMENT__",
+        ...(year !== undefined ? { year } : {}),
+      };
 
-  return prisma.scorecard.findMany({
+  const scorecards = await prisma.scorecard.findMany({
     where,
     include: SCORECARD_INCLUDE,
     orderBy: [
@@ -161,6 +225,8 @@ export async function getScorecards(actor: ScorecardActor, year?: number) {
       },
     ],
   });
+
+  return scorecards.map(serializeScorecard);
 }
 
 /**
@@ -190,7 +256,7 @@ export async function getScorecardById(
 
   assertDepartmentAccess(actor, scorecard.departmentId);
 
-  return scorecard;
+  return serializeScorecard(scorecard);
 }
 
 /**
@@ -227,6 +293,8 @@ export async function createScorecard(
     throw new ScorecardServiceError("Department not found.", "NOT_FOUND");
   }
 
+  assertDepartmentAccess(actor, department.id);
+
   const existingScorecard = await prisma.scorecard.findUnique({
     where: {
       departmentId_year: {
@@ -246,13 +314,15 @@ export async function createScorecard(
     );
   }
 
-  return prisma.scorecard.create({
+  const createdScorecard = await prisma.scorecard.create({
     data: {
       departmentId: input.departmentId,
       year: input.year,
     },
     include: SCORECARD_INCLUDE,
   });
+
+  return serializeScorecard(createdScorecard);
 }
 
 /**
@@ -282,6 +352,8 @@ export async function updateScorecard(
     throw new ScorecardServiceError("Scorecard not found.", "NOT_FOUND");
   }
 
+  assertDepartmentAccess(actor, existing.departmentId);
+
   const departmentId = input.departmentId ?? existing.departmentId;
   const year = input.year ?? existing.year;
 
@@ -308,6 +380,8 @@ export async function updateScorecard(
     throw new ScorecardServiceError("Department not found.", "NOT_FOUND");
   }
 
+  assertDepartmentAccess(actor, department.id);
+
   const duplicate = await prisma.scorecard.findFirst({
     where: {
       departmentId,
@@ -328,7 +402,7 @@ export async function updateScorecard(
     );
   }
 
-  return prisma.scorecard.update({
+  const updatedScorecard = await prisma.scorecard.update({
     where: {
       id: scorecardId,
     },
@@ -338,6 +412,8 @@ export async function updateScorecard(
     },
     include: SCORECARD_INCLUDE,
   });
+
+  return serializeScorecard(updatedScorecard);
 }
 
 /**
@@ -397,7 +473,7 @@ export async function validateScorecardWeights(
 }
 
 /**
- * Delete a scorecard only when it has no operational data attached.
+ * Delete a draft scorecard only when it has no operational data attached.
  *
  * We deliberately protect this operation instead of blindly cascading
  * through monthly plans/actuals and potentially destroying performance
@@ -429,12 +505,6 @@ export async function deleteScorecard(
         },
         take: 1,
       },
-      perspectives: {
-        select: {
-          id: true,
-        },
-        take: 1,
-      },
     },
   });
 
@@ -442,19 +512,14 @@ export async function deleteScorecard(
     throw new ScorecardServiceError("Scorecard not found.", "NOT_FOUND");
   }
 
+  assertDepartmentAccess(actor, scorecard.departmentId);
+
   if (
     scorecard.monthlyPlans.length > 0 ||
     scorecard.monthlyActuals.length > 0
   ) {
     throw new ScorecardServiceError(
       "This scorecard contains monthly operational data and cannot be deleted.",
-      "CONFLICT",
-    );
-  }
-
-  if (scorecard.perspectives.length > 0) {
-    throw new ScorecardServiceError(
-      "Remove the scorecard hierarchy before deleting the scorecard.",
       "CONFLICT",
     );
   }

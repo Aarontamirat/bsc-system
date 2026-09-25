@@ -136,16 +136,25 @@ export function ScorecardCreateDialog({ departments }: Props) {
               value={departmentId}
               onValueChange={(value) => setDepartmentId(value ?? "")}
               disabled={pending}>
-              <SelectTrigger id="scorecard-department">
+              <SelectTrigger id="scorecard-department" className="w-full">
                 <SelectValue placeholder="Select department" />
               </SelectTrigger>
 
-              <SelectContent>
-                {departments.map((department) => (
-                  <SelectItem key={department.id} value={department.id}>
-                    {department.name}
-                  </SelectItem>
-                ))}
+              <SelectContent className="z-50 min-w-(--radix-select-trigger-width) bg-(--background) dark:bg-slate-950 border border-slate-200 dark:border-slate-800 shadow-lg rounded-md p-1">
+                {departments.length === 0 ? (
+                  <div className="py-2 px-3 text-center text-xs text-slate-500">
+                    No departments available
+                  </div>
+                ) : (
+                  departments.map((department) => (
+                    <SelectItem
+                      key={department.id}
+                      value={department.id}
+                      className="cursor-pointer rounded-sm px-2.5 py-1.5 text-sm focus:bg-slate-100 dark:focus:bg-slate-800">
+                      {department.name}
+                    </SelectItem>
+                  ))
+                )}
               </SelectContent>
             </Select>
           </div>
@@ -159,13 +168,16 @@ export function ScorecardCreateDialog({ departments }: Props) {
               value={year}
               onValueChange={(value) => setYear(value ?? "")}
               disabled={pending}>
-              <SelectTrigger id="scorecard-year">
+              <SelectTrigger id="scorecard-year" className="w-full">
                 <SelectValue />
               </SelectTrigger>
 
-              <SelectContent>
+              <SelectContent className="z-50 min-w-(--radix-select-trigger-width) bg-(--background) dark:bg-slate-950 border border-slate-200 dark:border-slate-800 shadow-lg rounded-md p-1">
                 {years.map((value) => (
-                  <SelectItem key={value} value={String(value)}>
+                  <SelectItem
+                    key={value}
+                    value={String(value)}
+                    className="cursor-pointer rounded-sm px-2.5 py-1.5 text-sm focus:bg-slate-100 dark:focus:bg-slate-800">
                     FY{value}/{value + 1}
                   </SelectItem>
                 ))}

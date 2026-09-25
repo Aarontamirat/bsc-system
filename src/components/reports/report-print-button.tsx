@@ -1,14 +1,34 @@
 "use client";
 
-import { Printer } from "lucide-react";
+import React from "react";
+import {
+  ReportExportButtons,
+  type ExportGroupedPerspective,
+  type ExportMonth,
+} from "./report-export-buttons";
 
-import { Button } from "@/components/ui/button";
+type ReportPrintButtonProps = {
+  scorecardLabel?: string;
+  periodLabel?: string;
+  overallScore?: number | null;
+  months?: ExportMonth[];
+  groupedPerspectives?: ExportGroupedPerspective[];
+};
 
-export function ReportPrintButton() {
+export function ReportPrintButton({
+  scorecardLabel = "Scorecard Report",
+  periodLabel = "Select Period",
+  overallScore = null,
+  months = [],
+  groupedPerspectives = [],
+}: ReportPrintButtonProps) {
   return (
-    <Button type="button" variant="outline" onClick={() => window.print()}>
-      <Printer className="h-4 w-4" />
-      Print / export
-    </Button>
+    <ReportExportButtons
+      scorecardLabel={scorecardLabel}
+      periodLabel={periodLabel}
+      overallScore={overallScore}
+      months={months}
+      groupedPerspectives={groupedPerspectives}
+    />
   );
 }

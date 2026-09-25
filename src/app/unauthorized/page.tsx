@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 export default function UnauthorizedPage() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-slate-50 px-6">
-      <div className="w-full max-w-lg rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-xl shadow-slate-200/50 sm:p-10">
+      <div className="w-full max-w-lg rounded-3xl border border-slate-200 bg-(--background) p-8 text-center shadow-xl shadow-slate-200/50 sm:p-10">
         <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-red-50 text-red-600">
           <ShieldAlert className="h-6 w-6" />
         </div>
